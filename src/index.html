@@ -1,0 +1,38 @@
+<html>
+<head>
+<script
+  src="https://code.jquery.com/jquery-3.4.1.min.js"
+  integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+  crossorigin="anonymous"></script>
+<script>
+
+function init()
+{
+  const socket = new WebSocket('ws://' + window.location.host + ':' + window.location.port + '/ws');
+  socket.addEventListener('open', function (event) {
+    socket.send('Hello Server!');
+  });
+  socket.addEventListener('message', function (event) {
+    console.log('Message from server ', event.data);
+  });
+  socket.addEventListener('close', function (event) {
+    console.log('close');
+  });
+  socket.addEventListener('error', function (event) {
+    console.log('error');
+  });
+  $("button.led-button").click(function(){
+    var v = $(this).attr("v");
+    console.log("led: " + v);
+    socket.send(JSON.stringify({"led": v}));
+  });
+}
+$(init);
+</script>
+</head>
+<body>
+  <button class="led-button" v="on">LED ON</button>
+  <button class="led-button" v="off">LED OFF</button>
+  <button class="led-button" v="toggle">LED TOGGLE</button>
+</body>
+</html>
