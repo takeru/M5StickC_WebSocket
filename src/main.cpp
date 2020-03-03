@@ -42,40 +42,39 @@ void handleJsonRequest(JsonObject& req, JsonObject& resp)
   }
 }
 
-#define os_printf printf
 void onEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
   if(type == WS_EVT_CONNECT){
     //client connected
-    os_printf("ws[%s][%u] connect\n", server->url(), client->id());
+    printf("ws[%s][%u] connect\n", server->url(), client->id());
 
     DynamicJsonBuffer jsonBuffer;
     JsonObject& root = jsonBuffer.createObject();
-    root["msg"] = "Hello Client :)";
+    root["msg"] = "hello";
     root["id"] = client->id();
     size_t len = root.measureLength();
     AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len);
     root.printTo((char *)buffer->get(), len + 1);
-    ws.textAll(buffer);
+    client->text(buffer);
 
     client->ping();
   } else if(type == WS_EVT_DISCONNECT){
     //client disconnected
-    os_printf("ws[%s][%u] disconnect: %u\n", server->url(), client->id(), client->id());
+    printf("ws[%s][%u] disconnect: %u\n", server->url(), client->id(), client->id());
   } else if(type == WS_EVT_ERROR){
     //error was received from the other end
-    os_printf("ws[%s][%u] error(%u): %s\n", server->url(), client->id(), *((uint16_t*)arg), (char*)data);
+    printf("ws[%s][%u] error(%u): %s\n", server->url(), client->id(), *((uint16_t*)arg), (char*)data);
   } else if(type == WS_EVT_PONG){
     //pong message was received (in response to a ping request maybe)
-    os_printf("ws[%s][%u] pong[%u]: %s\n", server->url(), client->id(), len, (len)?(char*)data:"");
+    printf("ws[%s][%u] pong[%u]: %s\n", server->url(), client->id(), len, (len)?(char*)data:"");
   } else if(type == WS_EVT_DATA){
     //data packet
     AwsFrameInfo * info = (AwsFrameInfo*)arg;
     if(info->final && info->index == 0 && info->len == len){
       //the whole message is in a single frame and we got all of it's data
-      os_printf("ws[%s][%u] %s-message[%llu]: ", server->url(), client->id(), (info->opcode == WS_TEXT)?"text":"binary", info->len);
+      printf("ws[%s][%u] %s-message[%llu]: ", server->url(), client->id(), (info->opcode == WS_TEXT)?"text":"binary", info->len);
       if(info->opcode == WS_TEXT){
         data[len] = 0; // IS IT SAFE??
-        os_printf("%s\n", (char*)data);
+        printf("%s\n", (char*)data);
 
         DynamicJsonBuffer reqBuffer;
         JsonObject& req = reqBuffer.parseObject(data);
@@ -85,12 +84,52 @@ void onEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventTyp
         size_t len = resp.measureLength();
         AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len);
         resp.printTo((char *)buffer->get(), len + 1);
-        ws.textAll(buffer);
+        client->text(buffer);
       }
     } else {
       //message is comprised of multiple frames or the frame is split into multiple packets
-      os_printf("framed message: info->final=%d info->index=%lld info->len=%llu",
+      printf("framed message: info->final=%d info->index=%lld info->len=%llu",
         info->final, info->index, info->len);
+    }
+  }
+}
+
+String rtc_string()
+{
+  RTC_TimeTypeDef time;
+  RTC_DateTypeDef date;
+  M5.Rtc.GetTime(&time);
+  M5.Rtc.GetData(&date);
+  char s[20];
+  sprintf(s, "%04d-%02d-%02d %02d:%02d:%02d",
+    date.Year, date.Month, date.Date,
+    time.Hours, time.Minutes, time.Seconds
+  );
+  return String(s);
+}
+
+void update_display()
+{
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setRotation(3);
+  M5.Lcd.setTextFont(2);
+  M5.Lcd.setTextSize(1);
+  M5.Lcd.setTextColor(WHITE, BLACK);
+
+  M5.Lcd.setCursor(1, 1);
+
+  IPAddress ipAddress = WiFi.localIP();
+  M5.Lcd.printf("%s\n", ipAddress.toString().c_str());
+  M5.Lcd.printf("%lu\n", millis()/1000);
+}
+
+void textAllWriteAvailable(AsyncWebSocketMessageBuffer *buffer)
+{
+  for(const auto& c: ws.getClients()){
+    if(!c->queueIsFull()){
+      c->text(buffer);
+    }else{
+      printf("ws[%s][%u] queueIsFull\n", ws.url(), c->id());
     }
   }
 }
@@ -133,7 +172,76 @@ void setup() {
   server.onNotFound(notFound);
 
   server.begin();
+
+  M5.IMU.Init();
 }
 
-void loop() {
+void loop()
+{
+  unsigned long ms  = millis();
+  unsigned long sec = ms / 1000;
+  static unsigned long prev_ms         = 0;
+  static unsigned long prev_sec        = 0;
+  static unsigned long loop_count      = 0;
+  static unsigned long prev_loop_count = 0;
+  if(prev_sec < sec){
+    ws.cleanupClients();
+
+    DynamicJsonBuffer jsonBuffer;
+    JsonObject& root = jsonBuffer.createObject();
+    root["rtc"] = rtc_string();
+    root["loop/sec"] = int(1000*(loop_count-prev_loop_count)/(ms-prev_ms));
+    size_t len = root.measureLength();
+    AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len);
+    root.printTo((char *)buffer->get(), len + 1);
+    textAllWriteAvailable(buffer);
+
+    String pingData = String(ms);
+    ws.pingAll((uint8_t*)pingData.c_str(), strlen(pingData.c_str())+1);
+
+    prev_ms = ms;
+    prev_sec = sec;
+    prev_loop_count = loop_count;
+
+    update_display();
+  }
+
+  static unsigned long prev_imu_ms = 0;
+  if(0<ws.count() && prev_imu_ms+100<ms){
+    static float accX  = 0.0F;
+    static float accY  = 0.0F;
+    static float accZ  = 0.0F;
+    static float gyroX = 0.0F;
+    static float gyroY = 0.0F;
+    static float gyroZ = 0.0F;
+    static float pitch = 0.0F;
+    static float roll  = 0.0F;
+    static float yaw   = 0.0F;
+    M5.IMU.getAccelData(&accX, &accY, &accZ);
+    M5.IMU.getGyroData(&gyroX, &gyroY, &gyroZ);
+    M5.IMU.getAhrsData(&pitch, &roll, &yaw);
+
+    DynamicJsonBuffer jsonBuffer;
+    JsonObject& root = jsonBuffer.createObject();
+    root["ms"] = ms;
+    JsonObject& acc = root.createNestedObject("acc");
+    acc["x"] = accX;
+    acc["y"] = accY;
+    acc["z"] = accZ;
+    JsonObject& gyro = root.createNestedObject("gyro");
+    gyro["x"] = gyroX;
+    gyro["y"] = gyroY;
+    gyro["z"] = gyroZ;
+    JsonObject& ahrs = root.createNestedObject("ahrs");
+    ahrs["pitch"] = pitch;
+    ahrs["roll"]  = roll;
+    ahrs["yaw"]   = yaw;
+    size_t len = root.measureLength();
+    AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len);
+    root.printTo((char *)buffer->get(), len + 1);
+    textAllWriteAvailable(buffer);
+    prev_imu_ms = ms;
+  }
+
+  loop_count++;
 }

@@ -1,19 +1,27 @@
 <html>
 <head>
-<script
-  src="https://code.jquery.com/jquery-3.4.1.min.js"
+<script src="https://code.jquery.com/jquery-3.4.1.min.js"
   integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
-  crossorigin="anonymous"></script>
-<script>
+  crossorigin="anonymous">
+</script>
 
-function init()
-{
+<link href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.7.15/c3.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/5.15.0/d3.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.7.15/c3.js"></script>
+
+<script>
+function init(){
+  var chart = genChart();
   const socket = new WebSocket('ws://' + window.location.host + ':' + window.location.port + '/ws');
   socket.addEventListener('open', function (event) {
-    socket.send('Hello Server!');
+    socket.send(JSON.stringify({"msg": "hello"}));
   });
   socket.addEventListener('message', function (event) {
-    console.log('Message from server ', event.data);
+    var obj = JSON.parse(event.data);
+    console.log('message=', obj);
+    if(obj.ahrs){
+      pushData(chart, obj);
+    }
   });
   socket.addEventListener('close', function (event) {
     console.log('close');
@@ -28,11 +36,65 @@ function init()
   });
 }
 $(init);
+
+var data = {
+  x: ['ms'],
+  p: ['pitch'],
+  r: ['roll'],
+  y: ['yaw']
+}
+
+function genChart(){
+  var chart = c3.generate({
+    bindto: '#chart',
+    data: {
+      x: "ms",
+      columns: [
+      ],
+    },
+    axis: {
+      y: {
+        max:  180,
+        min: -180
+      }
+    },
+    transition: {
+      duration: 0
+    }
+  });
+  return chart;
+}
+
+function pushData(chart, d){
+  data.x.push(d.ms);
+  data.p.push(d.ahrs.pitch);
+  data.r.push(d.ahrs.roll);
+  data.y.push(d.ahrs.yaw);
+  var max = 50;
+  if(max+1<data.x.length){
+    data.x.splice(1,1);
+    data.p.splice(1,1);
+    data.r.splice(1,1);
+    data.y.splice(1,1);
+  }
+  var ms = data.x;
+  chart.load({
+    x: "ms",
+    columns: [
+      ms,
+      data.p,
+      data.r,
+      data.y
+    ]
+  });
+}
+
 </script>
 </head>
 <body>
   <button class="led-button" v="on">LED ON</button>
   <button class="led-button" v="off">LED OFF</button>
   <button class="led-button" v="toggle">LED TOGGLE</button>
+  <div id="chart"></div>
 </body>
 </html>
