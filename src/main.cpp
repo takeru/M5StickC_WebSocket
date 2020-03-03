@@ -2,6 +2,7 @@
 #include <M5StickC.h>
 #ifdef ESP32
 #include <WiFi.h>
+#include <WiFiMulti.h>
 #include <AsyncTCP.h>
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
@@ -9,9 +10,11 @@
 #endif
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#include "secret.h"
 
 #define LED_BUILTIN 10
 
+WiFiMulti wifiMulti;
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
@@ -118,8 +121,8 @@ void update_display()
 
   M5.Lcd.setCursor(1, 1);
 
-  IPAddress ipAddress = WiFi.localIP();
-  M5.Lcd.printf("%s\n", ipAddress.toString().c_str());
+  M5.Lcd.printf("ssid=%s\n", WiFi.SSID().c_str());
+  M5.Lcd.printf("localIP=%s\n", WiFi.localIP().toString().c_str());
   M5.Lcd.printf("%lu\n", millis()/1000);
 }
 
@@ -137,19 +140,21 @@ void textAllWriteAvailable(AsyncWebSocketMessageBuffer *buffer)
 #include "index_html.h"
 
 void setup() {
+  WIFI_MULTI_ADDAPS();
   M5.begin();
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);
 
   Serial.begin(115200);
   WiFi.mode(WIFI_STA);
-  WiFi.begin();
-  if (WiFi.waitForConnectResult() != WL_CONNECTED) {
-    printf("WiFi Failed!\n");
-    return;
+  while(1){
+    if(wifiMulti.run()==WL_CONNECTED){
+      break;
+    }
+    delay(1000);
   }
 
-  printf("IP Address: %s\n", WiFi.localIP().toString().c_str());
+  printf("ssid=%s localIP=%s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
 
   ws.onEvent(onEvent);
   server.addHandler(&ws);
