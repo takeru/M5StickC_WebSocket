@@ -24,7 +24,7 @@ void notFound(AsyncWebServerRequest *request) {
   request->send(404, "text/plain", "Not found");
 }
 
-void handleJsonRequest(JsonObject& req, JsonObject& resp)
+void handleJsonRequest(JsonDocument& req, JsonDocument& resp)
 {
   resp["result"] = "";
   if(req["led"]=="on"){
@@ -50,13 +50,12 @@ void onEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventTyp
     //client connected
     printf("ws[%s][%u] connect\n", server->url(), client->id());
 
-    DynamicJsonBuffer jsonBuffer;
-    JsonObject& root = jsonBuffer.createObject();
-    root["msg"] = "hello";
-    root["id"] = client->id();
-    size_t len = root.measureLength();
+    StaticJsonDocument<JSON_OBJECT_SIZE(2)> doc;
+    doc["msg"] = "hello";
+    doc["id"] = client->id();
+    size_t len = measureJson(doc);
     AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len);
-    root.printTo((char *)buffer->get(), len + 1);
+    serializeJson(doc, (char*)buffer->get(), len+1);
     client->text(buffer);
 
     client->ping();
@@ -79,15 +78,18 @@ void onEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventTyp
         data[len] = 0; // IS IT SAFE??
         printf("%s\n", (char*)data);
 
-        DynamicJsonBuffer reqBuffer;
-        JsonObject& req = reqBuffer.parseObject(data);
-        DynamicJsonBuffer respBuffer;
-        JsonObject& resp = respBuffer.createObject();
-        handleJsonRequest(req, resp);
-        size_t len = resp.measureLength();
-        AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len);
-        resp.printTo((char *)buffer->get(), len + 1);
-        client->text(buffer);
+        StaticJsonDocument<JSON_OBJECT_SIZE(10)> req;
+        DeserializationError error = deserializeJson(req, data);
+        if(error){
+          printf("ws[%s][%u] DeserializationError %s\n", server->url(), client->id(), error.c_str());
+        }else{
+          StaticJsonDocument<JSON_OBJECT_SIZE(10)> resp;
+          handleJsonRequest(req, resp);
+          size_t len = measureJson(resp);
+          AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len);
+          serializeJson(resp, (char*)buffer->get(), len+1);
+          client->text(buffer);
+        }
       }
     } else {
       //message is comprised of multiple frames or the frame is split into multiple packets
@@ -192,13 +194,12 @@ void loop()
   if(prev_sec < sec){
     ws.cleanupClients();
 
-    DynamicJsonBuffer jsonBuffer;
-    JsonObject& root = jsonBuffer.createObject();
+    StaticJsonDocument<JSON_OBJECT_SIZE(10)> root;
     root["rtc"] = rtc_string();
     root["loop/sec"] = int(1000*(loop_count-prev_loop_count)/(ms-prev_ms));
-    size_t len = root.measureLength();
+    size_t len = measureJson(root);
     AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len);
-    root.printTo((char *)buffer->get(), len + 1);
+    serializeJson(root, (char*)buffer->get(), len+1);
     textAllWriteAvailable(buffer);
 
     String pingData = String(ms);
@@ -226,24 +227,23 @@ void loop()
     M5.IMU.getGyroData(&gyroX, &gyroY, &gyroZ);
     M5.IMU.getAhrsData(&pitch, &roll, &yaw);
 
-    DynamicJsonBuffer jsonBuffer;
-    JsonObject& root = jsonBuffer.createObject();
+    StaticJsonDocument<JSON_OBJECT_SIZE(13)> root;
     root["ms"] = ms;
-    JsonObject& acc = root.createNestedObject("acc");
+    JsonObject acc = root.createNestedObject("acc");
     acc["x"] = accX;
     acc["y"] = accY;
     acc["z"] = accZ;
-    JsonObject& gyro = root.createNestedObject("gyro");
+    JsonObject gyro = root.createNestedObject("gyro");
     gyro["x"] = gyroX;
     gyro["y"] = gyroY;
     gyro["z"] = gyroZ;
-    JsonObject& ahrs = root.createNestedObject("ahrs");
+    JsonObject ahrs = root.createNestedObject("ahrs");
     ahrs["pitch"] = pitch;
     ahrs["roll"]  = roll;
     ahrs["yaw"]   = yaw;
-    size_t len = root.measureLength();
+    size_t len = measureJson(root);
     AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len);
-    root.printTo((char *)buffer->get(), len + 1);
+    serializeJson(root, (char*)buffer->get(), len+1);
     textAllWriteAvailable(buffer);
     prev_imu_ms = ms;
   }
